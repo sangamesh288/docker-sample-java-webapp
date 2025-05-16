@@ -4,7 +4,7 @@ pipeline {
     environment {
         AWS_REGION = 'us-east-1'
         ECR_REPO = '869935076424.dkr.ecr.us-east-1.amazonaws.com/k8s-project'
-        KUBE_CONFIG = credentials('KUBE_CONFIG_ID')  // Kubernetes config stored as a Jenkins secret
+        KUBE_CONFIG = credentials('KUBER_CONFIG_ID')  // Kubernetes config stored as a Jenkins secret
         DOCKER_IMAGE = "k8s-project:${env.BUILD_NUMBER}"
         NAMESPACES = "dev,test,prod"  // Store as comma-separated string
     }
@@ -25,7 +25,12 @@ pipeline {
                 script {
                     sh """
                         aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO}
-                        docker push ${DOCKER_IMAGE}
+                    """
+
+                    // Properly tag and push the Docker image
+                    sh """
+                        docker tag ${DOCKER_IMAGE} ${ECR_REPO}:${env.BUILD_NUMBER}
+                        docker push ${ECR_REPO}:${env.BUILD_NUMBER}
                     """
                 }
             }
@@ -43,8 +48,10 @@ pipeline {
                     def namespaceList = env.NAMESPACES.split(",") // Convert string to array
                     for (namespace in namespaceList) {
                         withKubeConfig([credentialsId: 'KUBE_CONFIG_ID']) {
-                            sh "kubectl apply -f k8s/deployment.yaml -n ${namespace}"
-                            sh "kubectl rollout status deployment/app-deployment -n ${namespace}"
+                            sh """
+                            kubectl apply -f k8s/deployment.yaml -n ${namespace}
+                            echo "Deploying to Kubernetes namespace: ${NAMESPACE}"
+                            """
                         }
                     }
                 }
