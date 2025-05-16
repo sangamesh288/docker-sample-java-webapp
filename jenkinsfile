@@ -1,0 +1,51 @@
+pipeline {
+    agent any
+    environment {
+        AWS_REGION = 'us-east-1'
+        ECR_REPO = '869935076424.dkr.ecr.us-east-1.amazonaws.com/k8s-project'
+        KUBE_CONFIG = credentials('KUBE_CONFIG_ID')  // Kubernetes config stored as a Jenkins secret
+        DOCKER_IMAGE = "k8s-project/app:${env.BUILD_NUMBER}"
+        NAMESPACES = ['dev', 'test', 'prod']  // Target namespaces
+    }
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git 'https://github.com/your-repo.git'
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                sh 'docker build -t $DOCKER_IMAGE .'
+            }
+        }
+        stage('Push to ECR') {
+            steps {
+                script {
+                    sh """
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO}
+                        docker push ${ECR_REPO}:${DOCKER_IMAGE}
+                    """
+                }
+            }
+        }
+        stage('Update Deployment Manifest') {
+            steps {
+                script {
+                    sh "sed -i 's|IMAGE_PLACEHOLDER|${DOCKER_IMAGE}|g' k8s/deployment.yaml"
+                }
+            }
+        }
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    for (namespace in NAMESPACES) {
+                        withKubeConfig([credentialsId: 'KUBE_CONFIG_ID']) {
+                            sh "kubectl apply -f k8s/deployment.yaml -n ${namespace}"
+                            sh "kubectl rollout status deployment/app-deployment -n ${namespace}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
