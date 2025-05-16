@@ -4,7 +4,7 @@ pipeline {
         AWS_REGION = 'us-east-1'
         ECR_REPO = '869935076424.dkr.ecr.us-east-1.amazonaws.com/k8s-project'
         KUBE_CONFIG = credentials('KUBER_CONFIG_ID')  // Kubernetes config stored as a Jenkins secret
-        DOCKER_IMAGE = "k8s-project/app:${env.BUILD_NUMBER}"
+        DOCKER_IMAGE = "k8s-project:${env.BUILD_NUMBER}"
         NAMESPACES = ['dev', 'test', 'prod']  // Target namespaces
     }
     stages {
