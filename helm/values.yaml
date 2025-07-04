@@ -1,0 +1,3 @@
+image:
+  repository: 189875343640.dkr.ecr.us-east-1.amazonaws.com/java-app
+  tag: "IMAGE_TAG_PLACEHOLDER"
