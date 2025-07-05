@@ -14,8 +14,7 @@ ingress:
   className: nginx
   annotations: {}
   hosts:
-    - host: java-app.local      # ✅ Use a unique host
+    - host: java-app-9.local    # Make this unique per build or service
       paths:
         - path: /
           pathType: Prefix
-
