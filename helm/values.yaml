@@ -1,9 +1,6 @@
-# values.yaml
-
 image:
   repository: 189875343640.dkr.ecr.us-east-1.amazonaws.com/java-app
-  tag: java-app-2
-  pullPolicy: IfNotPresent
+  tag: java-app-14
 
 service:
   name: app-service
@@ -12,9 +9,9 @@ service:
 ingress:
   enabled: true
   className: nginx
-  annotations: {}
   hosts:
-    - host: java-app-9.local    # Make this unique per build or service
+    - host: java-app.local     # Can be dynamic per build
       paths:
         - path: /
           pathType: Prefix
+
