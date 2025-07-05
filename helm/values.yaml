@@ -1,3 +1,19 @@
+# values.yaml
+
 image:
   repository: 189875343640.dkr.ecr.us-east-1.amazonaws.com/java-app
-  tag: "IMAGE_TAG_PLACEHOLDER"
+  tag: java-app-2
+  pullPolicy: IfNotPresent
+
+service:
+  name: app-service
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  hosts:
+    - paths:
+        - path: /
+          pathType: Prefix
