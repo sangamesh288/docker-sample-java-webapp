@@ -1,0 +1,57 @@
+pipeline {
+  agent { label 'helm-ingress' }
+
+  environment {
+    AWS_REGION       = 'us-east-1'
+    ECR_REPO         = '189875343640.dkr.ecr.us-east-1.amazonaws.com/java-app'
+    IMAGE_TAG        = "java-app-${BUILD_NUMBER}"
+    kube_config_token= 'KUBE_CONFIG_ID'  // Kubernetes config stored as a Jenkins secret
+    
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        git url: 'https://github.com/sangamesh288/docker-sample-java-webapp.git', branch: 'master'
+      }
+    }
+
+    stage('Build Docker Image') {
+            steps {
+                sh "docker build -t ${ECR_REPO}:${IMAGE_TAG} ."
+            }
+    }
+    
+    stage('Push to ECR') {
+            steps {
+                script {
+                    sh """
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO}
+                    """
+
+                    // Properly tag and push the Docker image
+                    sh """
+                        docker push ${ECR_REPO}:${IMAGE_TAG}
+                    """
+                }
+            }
+    }
+    
+    stage('Helm Deploy') {
+      steps {
+        withCredentials([string(credentialsId: "${kube_config_token}", variable: 'KUBECONFIG_CONTENT')]) {
+          sh """
+            # Replace tag placeholder with actual image tag
+             sed -i 's|IMAGE_TAG_PLACEHOLDER|${IMAGE_TAG}|g' helm/values.yaml
+ 
+            # Upgrade or install the Helm release
+            helm upgrade --install app-release helm/ \
+            --namespace jenkins \
+            --create-namespace \
+            --wait
+          """
+        }
+      }
+    }
+  }
+}
