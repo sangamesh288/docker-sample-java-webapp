@@ -1,5 +1,5 @@
 apiVersion: v2
-name: app-release
+name: java-app
 description: A helm chart for deploying the application
 type: application                                             
 version: 1.0.0
