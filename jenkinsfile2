@@ -1,0 +1,131 @@
+// Jenkinsfile
+
+pipeline {
+    agent any
+    
+    // Environment variables for the pipeline
+    environment {
+        // AWS ECR details
+        AWS_ACCOUNT_ID = '123456789012'
+        ECR_REPOSITORY = 'my-spring-boot-app'
+        
+        // Application and build details
+        APP_NAME = 'my-spring-boot-app'
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        
+        // Kubernetes and Helm details
+        KUBE_CONTEXT = 'arn:aws:eks:region:123456789012:cluster/my-eks-cluster' // Your EKS cluster ARN
+        HELM_RELEASE_NAME = 'my-app'
+        
+        // Blue-Green state management
+        // In a real-world scenario, you might use a file or a database.
+        // For this example, we'll use a simple environment variable to track the active color.
+        ACTIVE_COLOR = 'blue' // Set this to the initial color
+    }
+
+    stages {
+        stage('Checkout & Build') {
+            steps {
+                // Check out the code from the Git repository
+                git url: 'https://github.com/your-org/your-repo.git', branch: 'main'
+                
+                // Build the Spring Boot application using Maven
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+        
+        stage('Build & Push Docker Image') {
+            steps {
+                script {
+                    // Authenticate with AWS ECR
+                    // This uses a Jenkins credential with AWS access keys or an IAM role.
+                    withAWS(credentials: 'your-aws-credentials-id') {
+                        sh "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com"
+                    }
+                    
+                    // Build the Docker image
+                    sh "docker build -t ${APP_NAME}:${IMAGE_TAG} ."
+                    
+                    // Tag the Docker image for ECR
+                    sh "docker tag ${APP_NAME}:${IMAGE_TAG} ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
+                    
+                    // Push the Docker image to ECR
+                    sh "docker push ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
+                }
+            }
+        }
+        
+        stage('Helm Deployment (Green)') {
+            steps {
+                script {
+                    // Switch to the inactive color (the 'green' environment for the new deployment)
+                    def inactiveColor = (env.ACTIVE_COLOR == 'blue') ? 'green' : 'blue'
+                    
+                    // Install or upgrade the Helm chart for the new color
+                    // This creates the 'green' deployment with the new image.
+                    sh "helm upgrade --install ${HELM_RELEASE_NAME}-${inactiveColor} ./helm-chart \
+                        --namespace my-app \
+                        --set image.repository=${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${ECR_REPOSITORY} \
+                        --set image.tag=${IMAGE_TAG} \
+                        --set deployment.color=${inactiveColor} \
+                        --set service.selector.color=${inactiveColor} \
+                        --kube-context ${KUBE_CONTEXT} \
+                        --wait"
+                }
+            }
+        }
+        
+        stage('Validation') {
+            steps {
+                // This stage runs automated tests against the 'green' environment.
+                // Replace this with your actual test commands.
+                echo "Running automated tests against the new deployment (Green)..."
+                // Example: using curl to hit a health check endpoint
+                // Note: You would need to access the 'green' deployment's IP or a temporary route.
+                sh "curl --fail http://my-app-green.your-domain.com/actuator/health"
+            }
+        }
+        
+        stage('Switch Traffic') {
+            when {
+                // Only proceed if the validation stage was successful
+                expression { return currentBuild.result == 'SUCCESS' }
+            }
+            steps {
+                script {
+                    // Find the current active color and the new color
+                    def newColor = (env.ACTIVE_COLOR == 'blue') ? 'green' : 'blue'
+                    
+                    // Get the name of the active Helm release
+                    def activeRelease = "${HELM_RELEASE_NAME}-${env.ACTIVE_COLOR}"
+                    
+                    // Get the name of the new Helm release
+                    def newRelease = "${HELM_RELEASE_NAME}-${newColor}"
+                    
+                    // Patch the Kubernetes Service to switch the selector to the new deployment
+                    // This is the atomic traffic switch.
+                    sh "kubectl patch service ${HELM_RELEASE_NAME}-service -n my-app -p '{\"spec\":{\"selector\":{\"color\":\"${newColor}\"}}}' --kube-context ${KUBE_CONTEXT}"
+                    
+                    // Update the pipeline variable to reflect the new active color
+                    env.ACTIVE_COLOR = newColor
+                    
+                    echo "Traffic successfully switched from ${env.ACTIVE_COLOR} to ${newColor}."
+                }
+            }
+        }
+        
+        stage('Cleanup Old Deployment') {
+            steps {
+                script {
+                    // Find the old color (the one that was just replaced)
+                    def oldColor = (env.ACTIVE_COLOR == 'blue') ? 'green' : 'blue'
+                    
+                    // Uninstall the old Helm release
+                    sh "helm uninstall ${HELM_RELEASE_NAME}-${oldColor} -n my-app --kube-context ${KUBE_CONTEXT}"
+                    
+                    echo "Old deployment (${oldColor}) successfully uninstalled."
+                }
+            }
+        }
+    }
+}
