@@ -1,0 +1,88 @@
+// Jenkinsfile
+
+pipeline {
+    agent any
+    
+    // Environment variables for the pipeline
+    environment {
+        // AWS ECR details
+        AWS_ACCOUNT_ID = '123456789012'
+        ECR_REPOSITORY = 'my-canary-app'
+        
+        // Application and build details
+        APP_NAME = 'my-canary-app'
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        
+        // Kubernetes and Helm details
+        KUBE_CONTEXT = 'arn:aws:eks:region:123456789012:cluster/my-eks-cluster' // Your EKS cluster ARN
+        HELM_RELEASE_NAME = 'my-app'
+    }
+
+    stages {
+        stage('Checkout & Build') {
+            steps {
+                git url: 'https://github.com/your-org/your-repo.git', branch: 'main'
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+        
+        stage('Build & Push Docker Image') {
+            steps {
+                script {
+                    withAWS(credentials: 'your-aws-credentials-id') {
+                        sh "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com"
+                    }
+                    sh "docker build -t ${APP_NAME}:${IMAGE_TAG} ."
+                    sh "docker tag ${APP_NAME}:${IMAGE_TAG} ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
+                    sh "docker push ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
+                }
+            }
+        }
+        
+        stage('Deploy Canary (10%)') {
+            steps {
+                script {
+                    // Deploy a new release with the 'canary' subset
+                    // This creates the canary deployment. The VirtualService will route 10% of traffic here.
+                    sh "helm upgrade --install ${HELM_RELEASE_NAME}-canary ./helm-chart \
+                        --namespace my-app \
+                        --set app.version=${IMAGE_TAG} \
+                        --set deployment.name=${APP_NAME}-canary \
+                        --set service.subsetName=canary \
+                        --set virtualservice.weight=10 \
+                        --kube-context ${KUBE_CONTEXT} \
+                        --wait"
+                }
+            }
+        }
+        
+        stage('Manual Approval for Promotion') {
+            steps {
+                timeout(time: 30, unit: 'MINUTES') {
+                    input message: 'Canary deployment is live. Monitor metrics and approve to promote.', ok: 'Promote'
+                }
+            }
+        }
+        
+        stage('Promote & Cleanup') {
+            steps {
+                script {
+                    // Update the stable deployment with the new image
+                    sh "helm upgrade --install ${HELM_RELEASE_NAME}-stable ./helm-chart \
+                        --namespace my-app \
+                        --set app.version=${IMAGE_TAG} \
+                        --set deployment.name=${APP_NAME}-stable \
+                        --set service.subsetName=stable \
+                        --set virtualservice.weight=100 \
+                        --kube-context ${KUBE_CONTEXT} \
+                        --wait"
+                    
+                    // Uninstall the old canary deployment
+                    sh "helm uninstall ${HELM_RELEASE_NAME}-canary -n my-app --kube-context ${KUBE_CONTEXT}"
+                    
+                    echo "Canary promoted to stable and old deployment uninstalled."
+                }
+            }
+        }
+    }
+}
